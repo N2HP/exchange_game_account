@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from app.services.wallet_service import create_wallet, get_wallet_balance, get_transaction_history, search_transaction
+from app.services.wallet_service import create_wallet, get_wallet_balance, get_transaction_history, search_transaction, test
 
 wallet_bp = Blueprint('wallet', __name__)
 
@@ -40,3 +40,10 @@ def get_transaction_history_route():
     if not wallet_id:
         return jsonify({"error": "wallet_id is required"}), 400
     return jsonify(get_transaction_history(wallet_id))
+
+@wallet_bp.route('/wallet/test', methods=['GET'])
+def get_test_route():
+    wallet_id = request.args.get('wallet_id', type=int)
+    if not wallet_id:
+        return jsonify({"error": "wallet_id is required"}), 400
+    return jsonify(test(wallet_id))
