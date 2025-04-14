@@ -7,14 +7,14 @@ from app.database import db
 
 # Định nghĩa Enum cho loại giao dịch và trạng thái giao dịch
 class TransactionTypeEnum(Enum):
-    DEPOSIT = 'deposit'
-    WITHDRAWAL = 'withdrawal'
-    TRANSFER = 'transfer'
+    deposit = 'deposit'
+    withdrawal = 'withdrawal'
+    transfer = 'transfer'
 
 class TransactionStatusEnum(Enum):
-    PENDING = 'pending'
-    SUCCESSFUL = 'successful'
-    FAILED = 'failed'
+    pending = 'pending'
+    successful = 'successful'
+    failed = 'failed'
 
 class GatewayStatusEnum(Enum):
     PENDING = 'pending'
