@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 import urllib
-from app.services.transaction_service import withdraw
+from app.services.transaction_service import withdraw, transfer_money
 from app.utils.vnpay_payment import __hmacsha512, create_vnpay_payment_url, update_deposit
 from app.database import db
 from flask import request, jsonify
@@ -26,6 +26,21 @@ def deposit_money():
         return jsonify({"error": "wallet_id and amount are required"}), 400
     # return jsonify(deposit(wallet_id, amount))
     return jsonify({"payment_url": payment_url})
+
+@wallet_bp_t.route('/wallet/transfer', methods=['POST'])
+def transfer_money_to_someone():
+    data = request.get_json()
+    sender_wallet_id = data.get('sender_wallet_id')
+    receiver_wallet_id = data.get('receiver_wallet_id')
+    amount = data.get('amount')
+
+    if not sender_wallet_id or not receiver_wallet_id or not amount:
+        return jsonify({"error": "sender_wallet_id, receiver_wallet_id and amount are required"}), 400
+
+    # Call the transfer function from the service layer
+    result = transfer_money(sender_wallet_id, receiver_wallet_id, amount)
+    
+    return jsonify(result)
 
 @wallet_bp_t.route('/wallet/withdraw', methods=['POST'])
 def withdraw_money():
