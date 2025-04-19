@@ -1,26 +1,47 @@
-# from confluent_kafka import Producer
-# import json
+from confluent_kafka.avro import AvroProducer
+import avro.schema
 
-# conf = {
-#     'bootstrap.servers': 'localhost:9092'
-# }
+# ✅ Cấu hình AvroProducer
+conf = {
+    'bootstrap.servers': '157.66.218.191:9092',
+    'schema.registry.url': 'http://157.66.218.191:8081'  # ✅ phải có http://
+}
 
-# producer = Producer(conf)
+# ✅ Khai báo schema (dùng đúng hàm `parse`)
+value_schema_str = """
+{
+  "namespace": "wallet_v2",
+  "type": "record",
+  "name": "Transaction",
+  "fields": [
+    {"name": "user_id", "type": "int"},
+    {"name": "amount", "type": "double"},
+    {"name": "type", "type": "string"}
+  ]
+}
+"""
+value_schema = avro.schema.parse(value_schema_str)
 
-# def delivery_report(err, msg):
-#     if err is not None:
-#         print(f"❌ Delivery failed: {err}")
-#     else:
-#         print(f"✅ Message delivered to {msg.topic()} [{msg.partition()}]")
+# ✅ Tạo AvroProducer
+producer = AvroProducer(
+    conf,
+    default_value_schema=value_schema
+)
 
-# def send_transaction(user_id, amount, action):
-#     data = {
-#         "user_id": user_id,
-#         "amount": amount,
-#         "action": action
-#     }
+# ✅ Callback sau khi gửi thành công hoặc lỗi
+def delivery_report(err, msg):
+    if err is not None:
+        print(f"❌ Delivery failed: {err}")
+    else:
+        print(f"✅ Message delivered to {msg.topic()} [{msg.partition()}]")
 
-#     json_data = json.dumps(data).encode('utf-8')
+# ✅ Hàm gửi Avro message
+def send_transaction(user_id, amount, type):
+    data = {
+        "user_id": user_id,
+        "amount": amount,
+        "type": type
+    }
 
-#     producer.produce('wallet_transaction', value=json_data, callback=delivery_report)
-#     producer.flush()
+    producer.produce(topic='wallet_transaction', value=data, callback=delivery_report)
+    producer.flush()

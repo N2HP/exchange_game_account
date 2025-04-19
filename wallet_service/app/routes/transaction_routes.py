@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 import urllib
-from app.services.transaction_service import withdraw, transfer_money
+from app.services.transaction_service import escrow_hold_money, release_escrow_to_seller, withdraw, transfer_money
 from app.utils.vnpay_payment import __hmacsha512, create_vnpay_payment_url, update_deposit
 from app.database import db
 from flask import request, jsonify
@@ -9,6 +9,8 @@ from urllib.parse import urlencode
 from app.models import Transaction, TransactionStatusEnum, Wallet
 from app.config import Config
 from sqlalchemy.exc import SQLAlchemyError
+
+from app.kafka.producer import send_transaction
 
 
 
@@ -41,6 +43,28 @@ def transfer_money_to_someone():
     result = transfer_money(sender_wallet_id, receiver_wallet_id, amount)
     
     return jsonify(result)
+
+
+@wallet_bp_t.route('/wallet/hold_money', methods=['POST'])
+def hold_money():
+    data = request.get_json()
+    buyer_wallet_id = data.get('buyer_wallet_id')
+    seller_wallet_id = data.get('seller_wallet_id')
+    amount = data.get('amount')
+    if not buyer_wallet_id or not seller_wallet_id or not amount:
+        return jsonify({"error": "buyer_wallet_id, seller_wallet_id and amount are required"}), 400
+    return jsonify(escrow_hold_money(buyer_wallet_id, seller_wallet_id, amount))
+
+
+@wallet_bp_t.route('/wallet/escrow_release', methods=['POST'])
+def release_money():
+    data = request.get_json()
+    transaction_id = data.get('transaction_id')
+    if not transaction_id:
+        return jsonify({"error": "transaction_id is required"}), 400
+    return jsonify(release_escrow_to_seller(transaction_id))
+
+
 
 @wallet_bp_t.route('/wallet/withdraw', methods=['POST'])
 def withdraw_money():
@@ -91,6 +115,8 @@ def vnpay_return():
 
     # # Bước 3: Cập nhật trạng thái và cộng tiền
     result = update_deposit(transaction, amount)
+
+    send_transaction(transaction.user_id, amount, transaction.transaction_type.value)
     
     return jsonify({
         "message": "Thanh toán thành công!",

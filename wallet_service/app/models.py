@@ -10,6 +10,7 @@ class TransactionTypeEnum(Enum):
     deposit = 'deposit'
     withdrawal = 'withdrawal'
     transfer = 'transfer'
+    escrow = 'escrow'
 
 class TransactionStatusEnum(Enum):
     pending = 'pending'
