@@ -4,6 +4,10 @@ from flask_migrate import Migrate
 from flask_cors import CORS
 from app.config import Config
 from app.database import db
+import threading
+from app.kafka.consumer import start_consuming
+
+
 
 # Khởi tạo database
 # db = SQLAlchemy()
@@ -28,6 +32,8 @@ def create_app():
     
     app.register_blueprint(wallet_bp, url_prefix='/wallet')
     app.register_blueprint(wallet_bp_t, url_prefix='/wallet/transactions')
+
+    threading.Thread(target=start_consuming, daemon=True).start()
 
     return app
 app = create_app()  # Thêm dòng này

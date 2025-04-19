@@ -10,6 +10,7 @@ class TransactionTypeEnum(Enum):
     deposit = 'deposit'
     withdrawal = 'withdrawal'
     transfer = 'transfer'
+    escrow = 'escrow'
 
 class TransactionStatusEnum(Enum):
     pending = 'pending'
@@ -58,6 +59,9 @@ class Transaction(db.Model):
     amount = db.Column(db.Numeric(20, 2), nullable=False)
     status = db.Column(db.Enum(TransactionStatusEnum, name="transaction_status_enum"), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    destination = db.Column(db.Text, nullable=True)  # Cột mới đã thêm
+
+
 
     # Quan hệ hai chiều với Wallet
     wallet = db.relationship("Wallet", back_populates="transactions")
@@ -86,7 +90,7 @@ class BalanceHistory(db.Model):
     
     history_id = db.Column(db.Integer, primary_key=True)
     wallet_id = db.Column(db.Integer, db.ForeignKey('wallets.wallet_id', ondelete='CASCADE'), nullable=False)
-    transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.transaction_id', ondelete='CASCADE'), nullable=False)
+    transaction_id = db.Column(db.BigInteger, db.ForeignKey('transactions.transaction_id', ondelete='CASCADE'), nullable=False)
     previous_balance = db.Column(db.Numeric(20, 2), nullable=False)
     new_balance = db.Column(db.Numeric(20, 2), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

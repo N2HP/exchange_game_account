@@ -40,7 +40,8 @@ def create_vnpay_payment_url(amount, wallet_id):
             wallet_id=wallet_id,
             transaction_type=TransactionTypeEnum.deposit.value,
             amount=amount,
-            status=TransactionStatusEnum.pending.value
+            status=TransactionStatusEnum.pending.value,
+            destination="vnpay"  # Cột mới đã thêm
         )
         db.session.add(transaction)
         db.session.commit()
