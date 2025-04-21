@@ -3,6 +3,7 @@ from app.models import db, Wallet, Transaction, TransactionTypeEnum, Transaction
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.utils.vnpay_payment import generate_transaction_id
+from app.kafka.producer import send_hold_notification, send_notification, send_release_notification
 
 
 
@@ -106,38 +107,45 @@ def escrow_hold_money(buyer_wallet_id, seller_wallet_id, amount):
 
         if buyer_wallet.balance < amount:
             return {"error": "Insufficient balance"}, 400
-
-        # Record previous balance
-        previous_buyer_balance = buyer_wallet.balance
-        
-        # Reduce buyer's available balance
-        new_buyer_balance = buyer_wallet.balance - amount
-        buyer_wallet.balance = new_buyer_balance
-        
-        # Create escrow transaction
-        escrow_transaction_id = generate_transaction_id(buyer_wallet.user_id)
-        escrow_transaction = Transaction(
-            transaction_id=escrow_transaction_id,
-            user_id=buyer_wallet.user_id,
-            wallet_id=buyer_wallet_id,
-            transaction_type=TransactionTypeEnum.escrow.value,  # You might need to add this enum value
-            amount=amount,
-            status=TransactionStatusEnum.pending.value,  # Mark as pending until released
-            destination="escrow_" + str(seller_wallet_id)
-        )
-        
-        db.session.add(escrow_transaction)
-        
-        # Record balance history
-        balance_history = BalanceHistory(
-            wallet_id=buyer_wallet_id,
-            transaction_id=escrow_transaction_id,
-            previous_balance=previous_buyer_balance,
-            new_balance=new_buyer_balance
-        )
-        
-        db.session.add(balance_history)
-        db.session.commit()
+        try:
+            # Record previous balance
+            previous_buyer_balance = buyer_wallet.balance
+            
+            # Reduce buyer's available balance
+            new_buyer_balance = buyer_wallet.balance - amount
+            buyer_wallet.balance = new_buyer_balance
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return {"error": str(e)}, 500
+        try:
+            # Create escrow transaction
+            escrow_transaction_id = generate_transaction_id(buyer_wallet.user_id)
+            escrow_transaction = Transaction(
+                transaction_id=escrow_transaction_id,
+                user_id=buyer_wallet.user_id,
+                wallet_id=buyer_wallet_id,
+                transaction_type=TransactionTypeEnum.escrow.value,  # You might need to add this enum value
+                amount=amount,
+                status=TransactionStatusEnum.pending.value,  # Mark as pending until released
+                destination="escrow_" + str(seller_wallet_id)
+            )
+            
+            db.session.add(escrow_transaction)
+            
+            # Record balance history
+            balance_history = BalanceHistory(
+                wallet_id=buyer_wallet_id,
+                transaction_id=escrow_transaction_id,
+                previous_balance=previous_buyer_balance,
+                new_balance=new_buyer_balance
+            )
+            
+            db.session.add(balance_history)
+            db.session.commit()
+            send_hold_notification(str(escrow_transaction_id), amount,escrow_transaction.status.value) 
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return {"error": str(e)}, 500
         
         return {
             "message": "Money held in escrow successfully", 
@@ -184,38 +192,43 @@ def release_escrow_to_seller(escrow_transaction_id):
         
         # Record previous balance
         previous_seller_balance = seller_wallet.balance
-        
+        try:
         # Update seller balance
-        new_seller_balance = seller_wallet.balance + amount
-        seller_wallet.balance = new_seller_balance
-        
-        # Update escrow transaction status
-        escrow_transaction.status = TransactionStatusEnum.successful.value
-        
-        # Create new transaction for seller
-        seller_transaction_id = generate_transaction_id(seller_wallet.user_id)
-        seller_transaction = Transaction(
-            transaction_id=seller_transaction_id,
-            user_id=seller_wallet.user_id,
-            wallet_id=seller_wallet_id,
-            transaction_type=TransactionTypeEnum.escrow.value,  # You might need to add this enum value
-            amount=amount,
-            status=TransactionStatusEnum.successful.value,
-            destination="from_escrow_" + str(escrow_transaction_id)
-        )
-        
-        db.session.add(seller_transaction)
-        
-        # Record balance history
-        balance_history = BalanceHistory(
-            wallet_id=seller_wallet_id,
-            transaction_id=seller_transaction_id,
-            previous_balance=previous_seller_balance,
-            new_balance=new_seller_balance
-        )
-        
-        db.session.add(balance_history)
-        db.session.commit()
+            new_seller_balance = seller_wallet.balance + amount
+            seller_wallet.balance = new_seller_balance
+          
+            # Update escrow transaction status
+            escrow_transaction.status = TransactionStatusEnum.successful.value
+            
+            # Create new transaction for seller
+            seller_transaction_id = generate_transaction_id(seller_wallet.user_id)
+            seller_transaction = Transaction(
+                transaction_id=seller_transaction_id,
+                user_id=seller_wallet.user_id,
+                wallet_id=seller_wallet_id,
+                transaction_type=TransactionTypeEnum.escrow.value,  # You might need to add this enum value
+                amount=amount,
+                status=TransactionStatusEnum.successful.value,
+                destination="from_escrow_" + str(escrow_transaction_id)
+            )
+            
+            db.session.add(seller_transaction)
+            
+            # Record balance history
+            balance_history = BalanceHistory(
+                wallet_id=seller_wallet_id,
+                transaction_id=seller_transaction_id,
+                previous_balance=previous_seller_balance,
+                new_balance=new_seller_balance
+            )
+            
+            db.session.add(balance_history)
+            db.session.commit()
+            send_release_notification(str(escrow_transaction_id), amount, seller_transaction.status.value)
+            send_notification(seller_wallet.user_id, amount, seller_transaction.transaction_type.value, seller_transaction.status.value)
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return {"error": str(e)}, 500  
         
         return {
             "message": "Escrow funds released to seller successfully", 
@@ -230,7 +243,6 @@ def release_escrow_to_seller(escrow_transaction_id):
 
 
 
-
 def withdraw(wallet_id, amount):
     try:
         wallet = Wallet.query.get(wallet_id)
@@ -239,30 +251,40 @@ def withdraw(wallet_id, amount):
         if wallet.balance < amount:
             return {"error": "Insufficient balance"}, 400
         
+        withdraw_transaction_id = generate_transaction_id(wallet.user_id)
         previous_balance = wallet.balance
         new_balance = wallet.balance - amount
-        
-        transaction = Transaction(
-            user_id=wallet.user_id,
-            wallet_id=wallet_id,
-            transaction_type=TransactionTypeEnum.withdrawal.value,
-            amount=amount,
-            status=TransactionStatusEnum.successful.value
-        )
+        transaction = None  # Khởi tạo biến transaction
 
-        db.session.add(transaction)
-        db.session.flush() 
-        wallet.balance = new_balance
-        balance_history = BalanceHistory(
-            wallet_id=wallet_id,
-            transaction_id=transaction.transaction_id,
-            previous_balance=previous_balance,
-            new_balance=new_balance
-        )
-        db.session.add(balance_history)
-        db.session.commit()
-        
-        return {"message": "Withdrawal successful", "new_balance": float(new_balance)}, 200
+        try:
+            transaction = Transaction(
+                transaction_id=withdraw_transaction_id,
+                user_id=wallet.user_id,
+                wallet_id=wallet_id,
+                transaction_type=TransactionTypeEnum.withdrawal.value,
+                amount=amount,
+                status=TransactionStatusEnum.successful.value
+            )
+
+            db.session.add(transaction)
+            db.session.flush() 
+            wallet.balance = new_balance
+            balance_history = BalanceHistory(
+                wallet_id=wallet_id,
+                transaction_id=withdraw_transaction_id,
+                previous_balance=previous_balance,
+                new_balance=new_balance
+            )
+            db.session.add(balance_history)
+            db.session.commit()
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            # Đổi status thành fail nếu transaction đã được tạo
+            if transaction:
+                transaction.status = TransactionStatusEnum.failed.value
+            return withdraw_transaction_id
+        return withdraw_transaction_id
+
     except SQLAlchemyError as e:
         db.session.rollback()
-        return {"error": str(e)}, 500
+        return {"error": str(e)}
