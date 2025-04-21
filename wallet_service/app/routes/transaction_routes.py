@@ -10,7 +10,7 @@ from app.models import Transaction, TransactionStatusEnum, Wallet
 from app.config import Config
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.kafka.producer import send_transaction
+from app.kafka.producer import send_notification
 
 
 
@@ -26,7 +26,6 @@ def deposit_money():
     payment_url = create_vnpay_payment_url(amount, wallet_id)
     if not wallet_id or not amount:
         return jsonify({"error": "wallet_id and amount are required"}), 400
-    # return jsonify(deposit(wallet_id, amount))
     return jsonify({"payment_url": payment_url})
 
 @wallet_bp_t.route('/wallet/transfer', methods=['POST'])
@@ -73,7 +72,18 @@ def withdraw_money():
     amount = data.get('amount')
     if not wallet_id or not amount:
         return jsonify({"error": "wallet_id and amount are required"}), 400
-    return jsonify(withdraw(wallet_id, amount))
+    try:
+        pla=withdraw(wallet_id, amount)
+    except SQLAlchemyError as e:
+        return jsonify({"error": str(e)}), 500
+    
+    transaction = db.session.query(Transaction).filter_by(transaction_id=pla).first()
+    send_notification(transaction.user_id, amount, transaction.transaction_type.value, transaction.status.value)
+
+    return jsonify({
+        "message": "Rút tiền thành công!",
+        "transaction_id": pla,
+    })
 
 @wallet_bp_t.route('/wallet/vnpay_return', methods=['GET'])
 def vnpay_return():
@@ -101,7 +111,6 @@ def vnpay_return():
     order_id = vnp_params.get("vnp_TxnRef")
     amount = int(vnp_params.get("vnp_Amount", 0)) // 100  # đổi về đơn vị VND
 
-    # transaction=db.session.query(Transaction).filter_by(transaction_id=order_id).first()
     transaction = db.session.query(Transaction).filter_by(transaction_id=order_id).first()
 
     print(transaction)
@@ -116,11 +125,18 @@ def vnpay_return():
     # # Bước 3: Cập nhật trạng thái và cộng tiền
     result = update_deposit(transaction, amount)
 
-    send_transaction(transaction.user_id, amount, transaction.transaction_type.value)
-    
+    send_notification(transaction.user_id, amount, transaction.transaction_type.value, transaction.status.value)
+
     return jsonify({
         "message": "Thanh toán thành công!",
         "order_id": order_id,
         "amount": amount,
         "new_balance": result # Lấy giá trị new_balance từ result
     }), 200
+
+
+@wallet_bp_t.route('/wallet/test', methods=['POST'])
+def test():
+    data = request.get_json()
+    print(data)
+    return jsonify({"message": "ok"}), 200
